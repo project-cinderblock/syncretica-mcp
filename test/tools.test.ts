@@ -77,6 +77,7 @@ describe("MCP Server Tool Execution", () => {
       "get_cluster_report",
       "create_cluster_report",
       "generate_deep_synthesis",
+      "wait_for_cluster_report",
       "get_report_summary",
       "get_report_sub_report",
       // Jobs

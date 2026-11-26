@@ -226,6 +226,9 @@ export interface ClusterReport {
   completed_at?: string | null;
   created_at: string;
   updated_at: string;
+  job_id?: string | null;
+  timed_out?: boolean;
+  is_running?: boolean;
   summaries?: ClusterReportSummary[];
   sub_reports?: ClusterSubReport[];
 }
@@ -243,4 +246,6 @@ export interface JobStatus {
   started_at?: string | null;
   completed_at?: string | null;
   updated_at: string;
+  timed_out?: boolean;
+  is_running?: boolean;
 }

@@ -50,12 +50,26 @@ export function registerJobTools(server: McpServer, client: SyncreticaApiClient)
     "Poll a background job until completion or failure with configurable timeout.",
     {
       job_id: z.string().describe("ActiveJob UUID to wait for"),
-      poll_interval_ms: z.number().int().min(500).max(10000).optional().default(2000).describe("Polling interval in milliseconds (default: 2000)"),
-      timeout_ms: z.number().int().min(1000).max(600000).optional().default(60000).describe("Maximum wait timeout in milliseconds (default: 60000)")
+      poll_interval_ms: z.number().int().min(500).max(30000).optional().default(2000).describe("Polling interval in milliseconds (default: 2000)"),
+      timeout_ms: z.number().int().min(1000).max(1800000).optional().default(300000).describe("Maximum wait timeout in milliseconds (default: 300000 = 5 min, max: 30 min)")
     },
     async ({ job_id, poll_interval_ms, timeout_ms }) => {
       try {
         const job = await client.waitForJob(job_id, poll_interval_ms, timeout_ms);
+        if (job.timed_out || job.is_running || job.status === "running" || job.status === "queued") {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                status: "still_running",
+                job_id,
+                job_status: job.status,
+                progress: job.progress,
+                message: `Job ${job_id} is still running in background (${job.status}). Do NOT retry or trigger duplicate tasks. You can continue waiting with wait_for_job(job_id='${job_id}').`
+              }, null, 2)
+            }]
+          };
+        }
         return {
           content: [{ type: "text", text: JSON.stringify(job, null, 2) }]
         };
