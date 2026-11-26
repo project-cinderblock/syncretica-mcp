@@ -32,8 +32,10 @@ export class SyncreticaApiError extends Error {
 
 export class SyncreticaApiClient {
   private http: AxiosInstance;
+  public readonly apiUrl: string;
 
   constructor(config: ServerConfig) {
+    this.apiUrl = config.apiUrl;
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       Accept: "application/json"
@@ -546,7 +548,11 @@ export class SyncreticaApiClient {
   }): Promise<ClusterReport> {
     try {
       const res = await this.http.post<ApiResponse<ClusterReport>>("/cluster_reports", data);
-      return res.data.data;
+      const report = res.data.data;
+      if (res.data.meta && (res.data.meta as Record<string, unknown>).job_id) {
+        report.job_id = (res.data.meta as Record<string, unknown>).job_id as string;
+      }
+      return report;
     } catch (err) {
       return this.handleError(err);
     }
@@ -555,10 +561,54 @@ export class SyncreticaApiClient {
   async deepSynthesis(reportId: number, data?: { batch_size?: number }): Promise<ClusterReport> {
     try {
       const res = await this.http.post<ApiResponse<ClusterReport>>(`/cluster_reports/${reportId}/deep_synthesis`, data || {});
-      return res.data.data;
+      const report = res.data.data;
+      if (res.data.meta && (res.data.meta as Record<string, unknown>).job_id) {
+        report.job_id = (res.data.meta as Record<string, unknown>).job_id as string;
+      }
+      return report;
     } catch (err) {
       return this.handleError(err);
     }
+  }
+
+  async waitForClusterReport(
+    id: number,
+    pollIntervalMs = 5000,
+    timeoutMs = 600000
+  ): Promise<ClusterReport> {
+    const startTime = Date.now();
+    let lastReport: ClusterReport | null = null;
+    while (Date.now() - startTime < timeoutMs) {
+      const report = await this.getClusterReport(id, {
+        include_summaries: false,
+        include_sub_reports: false
+      });
+      lastReport = report;
+      if (report.status === "completed") {
+        return await this.getClusterReport(id, {
+          include_summaries: false,
+          include_sub_reports: true
+        });
+      }
+      if (report.status === "failed") {
+        throw new SyncreticaApiError(
+          report.error_message || `Cluster report ${id} failed`,
+          "report_failed"
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    }
+    if (lastReport && (lastReport.status === "running" || lastReport.status === "queued")) {
+      return {
+        ...lastReport,
+        timed_out: true,
+        is_running: true
+      };
+    }
+    throw new SyncreticaApiError(
+      `Cluster report ${id} timed out after ${timeoutMs}ms while waiting for completion`,
+      "report_timeout"
+    );
   }
 
   async getClusterReportSummary(id: number): Promise<ClusterReportSummary> {
@@ -600,8 +650,10 @@ export class SyncreticaApiClient {
 
   async waitForJob(jobId: string, pollIntervalMs = 2000, timeoutMs = 60000): Promise<JobStatus> {
     const startTime = Date.now();
+    let lastJob: JobStatus | null = null;
     while (Date.now() - startTime < timeoutMs) {
       const job = await this.getJob(jobId);
+      lastJob = job;
       if (job.status === "completed") {
         return job;
       }
@@ -612,6 +664,14 @@ export class SyncreticaApiClient {
         );
       }
       await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    }
+    if (lastJob && (lastJob.status === "running" || lastJob.status === "queued")) {
+      return {
+        ...lastJob,
+        timed_out: true,
+        is_running: true,
+        message: `Job ${jobId} is still ${lastJob.status} in the background after ${timeoutMs}ms. Do NOT retry or duplicate.`
+      };
     }
     throw new SyncreticaApiError(
       `Job ${jobId} timed out after ${timeoutMs}ms while waiting for completion`,
